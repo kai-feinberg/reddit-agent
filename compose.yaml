@@ -1,0 +1,23 @@
+version: '3'
+
+services:
+  streamlit:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./:/app:rw  # explicit read-write mount
+    environment:
+      - PORT=8501
+      - WATCHDOG_TIMEOUT=10
+      - STREAMLIT_SERVER_RUN_ON_SAVE=true
+      - STREAMLIT_SERVER_FILE_WATCHER_TYPE=poll
+    command: >
+      streamlit run streamlit_ui.py 
+      --server.runOnSave=true 
+      --server.address=0.0.0.0 
+      --server.port=8501
+      --server.fileWatcherType=poll
+    restart: unless-stopped
