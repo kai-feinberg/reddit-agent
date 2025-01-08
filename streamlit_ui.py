@@ -19,8 +19,10 @@ model = OpenAIModel('gpt-4o')
 
 async def prompt_ai(messages):
     async with AsyncClient() as client:
-        brave_api_key = os.getenv('BRAVE_API_KEY', None)
-        deps = Deps(client=client, brave_api_key=brave_api_key)
+        reddit_client_id = os.getenv('REDDIT_CLIENT_ID', None)
+        reddit_client_secret = os.getenv('REDDIT_CLIENT_SECRET', None)
+
+        deps = Deps(client=client, reddit_client_id=reddit_client_id, reddit_client_secret=reddit_client_secret)
 
         async with ai_agent.run_stream(
             messages[-1].content, deps=deps, message_history=messages[:-1]
@@ -65,12 +67,21 @@ async def prompt_ai(messages):
                         st.markdown("**Arguments:**")
                         st.code(tool['arguments'], language='json')
                         st.markdown("**Tool Output:**")
-                        st.markdown(
-                            f"""<div style="height: 200px; overflow-y: auto; border: 1px solid #ccc; padding: 10px;">
-                            <pre>{tool['response']}</pre>
-                            </div>""", 
-                            unsafe_allow_html=True
-                        )
+                        # st.markdown(
+                        #     f"""<div style="height: 200px; overflow-y: auto; border: 1px solid #ccc; padding: 10px;">
+                        #     <pre>{tool['response']}</pre>
+                        #     </div>""", 
+                        #     unsafe_allow_html=True
+                        # )
+                        with stylable_container(
+                            "codeblock",
+                            """
+                            code {
+                                white-space: pre-wrap !important;
+                            }
+                            """,
+                        ):
+                            st.code(tool['response'], language='json')
 
 async def main():
     st.title("AI Chatbot with agents")

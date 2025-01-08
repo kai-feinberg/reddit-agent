@@ -1,10 +1,11 @@
 from __future__ import annotations as _annotations
 
+import praw
 import asyncio
 import os
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, Dict
 
 import logfire
 from devtools import debug
@@ -40,108 +41,78 @@ logfire.configure(
 @dataclass
 class Deps:
     client: AsyncClient
-    brave_api_key: str | None
+    reddit_client_id: str | None
+    reddit_client_secret: str | None
 
 
 ai_agent = Agent(
     model,
     system_prompt=
-        '''You are an expert at researching the web to answer user questions. 
-        Format your response in markdown and provide citations as well as the sources at the end of the response. 
-        You also have the ability to fetch the transcript of Youtube Videos. Use this functionality to generate notes in markdown format based on the content of a youtube video.
-
-        When taking notes use the following guidelines:
-            Please summarize the following information as structured notes. Focus on capturing key points, omitting unnecessary details, and using bullet points or short paragraphs for readability. Prioritize clarity and conciseness by highlighting:
-                1. **Main topics or sections**
-                2. **Key points, insights, or findings**
-                3. **Supporting details** (only if essential)
-                4. **Action items or next steps** (if applicable)
-                5. **Dates, names, or specific terms** (only if relevant)
-
-                Format the notes in bullet points or short, clear sentences. Avoid repetition or filler words. Aim for a summary that is easy to scan and ideal for quick reference.
-    
+        '''
+        You are a helpful assistant
         ''',
     deps_type=Deps,
     retries=2
 )
 
-
 @ai_agent.tool
-async def search_web(
-    ctx: RunContext[Deps], web_query: str
-) -> str:
+async def search_reddit(ctx: RunContext[Deps], query: str) -> Dict[str, Any]:
     """
-     
-    Search the web given a query defined to answer the user's question.
+    Search Reddit with a given query and return results as a dictionary.
 
     Args:
-        ctx: The context.
-        web_query: The query for the web search.
+        ctx: The context containing dependencies such as Reddit credentials.
+        query: The search query.
 
     Returns:
-        str: The search results as a formatted string.
+        A dictionary containing the search results with relevant posts and their comments.
     """
-    if ctx.deps.brave_api_key is None:
-        return "This is a test web search result. Please provide a Brave API key to get real search results."
+    reddit = praw.Reddit(
+        client_id=ctx.deps.reddit_client_id,
+        client_secret=ctx.deps.reddit_client_secret,
+        user_agent='A search method for Reddit to surface the most relevant posts'
+    )
 
-    headers = {
-        'X-Subscription-Token': ctx.deps.brave_api_key,
-        'Accept': 'application/json',
-    }
-    
-    with logfire.span('calling Brave search API', query=web_query) as span:
-        r = await ctx.deps.client.get(
-            'https://api.search.brave.com/res/v1/web/search',
-            params={
-                'q': web_query,
-                'count': 5,
-                'text_decorations': True,
-                'search_lang': 'en'
-            },
-            headers=headers
+    # Fetch search results
+    search_results = reddit.subreddit("all").search(query, limit=5)
+
+    # Process results into a JSON-like structure
+    result_list = []
+    for post in search_results:
+        if not post.selftext:  # Skip posts without text
+            continue
+
+        # Fetch and sort comments by score
+        comments = sorted(
+            post.comments.list(),  # Flatten the comment tree
+            key=lambda comment: comment.score if isinstance(comment, praw.models.Comment) else 0,
+            reverse=True
         )
-        r.raise_for_status()
-        data = r.json()
-        span.set_attribute('response', data)
 
-    results = []
-    
-    # Add web results in a nice formatted way
-    web_results = data.get('web', {}).get('results', [])
-    for item in web_results[:3]:
-        title = item.get('title', '')
-        description = item.get('description', '')
-        url = item.get('url', '')
-        if title and description:
-            results.append(f"Title: {title}\nSummary: {description}\nSource: {url}\n")
+        # Extract relevant fields for comments, limiting to the first 15 processed comments
+        processed_comments = [
+            {
+                "author": comment.author.name if comment.author else None,
+                "score": comment.score,
+                "body": comment.body[:1800]  # Limit the comment body length
+            }
+            for comment in comments if isinstance(comment, praw.models.Comment) and comment.body != "[removed]"
+        ][:8]  # Take only the first 8 comments
 
-    return "\n".join(results) if results else "No results found for the query."
+        # Append post details to the results list
+        result_list.append({
+            "title": post.title,
+            "subreddit": str(post.subreddit),
+            "score": post.score,
+            "num_comments": post.num_comments,
+            "selftext": post.selftext,
+            "url": post.url,
+            "comments": processed_comments
+        })
 
-@ai_agent.tool
-async def get_youtube_transcript(
-    ctx: RunContext[Deps], video_url: str
-)-> str:
-    """
-     
-    Get the transcript of a YouTube video. Use this to take generate notes in markdown format based on the content of a youtube video.
+    # Return as a dictionary
+    return {"results": result_list}
 
-    Args:
-        ctx: The context.
-        video_url: The URL of the YouTube video.
-
-    Returns:
-        str: The transcript of the video.
-    """
-    with logfire.span('getting YouTube transcript', video_url=video_url) as span:
-        if not video_url.startswith('https://www.youtube.com/watch?v='):
-            return "Invalid YouTube video URL. Please provide a valid YouTube video URL."
-        video_id = video_url.split('v=')[-1]
-        transcript = YouTubeTranscriptApi.get_transcript(video_id)
-        formatter = TextFormatter()
-        formatted_transcript = formatter.format_transcript(transcript)
-        span.set_attribute('transcript', formatted_transcript)
-    
-    return formatted_transcript if formatted_transcript else "No transcript found for the video."
 
 async def main():
     # async with AsyncClient() as client:
