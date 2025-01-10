@@ -1,127 +1,161 @@
-from dotenv import load_dotenv
-from httpx import AsyncClient
-import streamlit as st
+from __future__ import annotations
+from typing import Literal, TypedDict
 import asyncio
-import json
+import httpx
 import os
-from openai import AsyncOpenAI, OpenAI
-from pydantic_ai.messages import ModelTextResponse, UserPrompt
-from pydantic_ai.models.openai import OpenAIModel
 
-# imports the search agent and its dependencies
+import streamlit as st
+import json
+import logfire
+
+# Import all the message part classes
+from pydantic_ai.messages import (
+    ModelMessage,
+    ModelRequest,
+    ModelResponse,
+    SystemPromptPart,
+    UserPromptPart,
+    TextPart,
+    ToolCallPart,
+    ToolReturnPart,
+    RetryPromptPart,
+    ModelMessagesTypeAdapter
+)
 from ai_agent import ai_agent, Deps
 
+# Load environment variables if needed
+from dotenv import load_dotenv
 load_dotenv()
-llm = os.getenv('LLM_MODEL', 'gpt-4o')
 
-model = OpenAIModel('gpt-4o')
+# Configure logfire to suppress warnings (optional)
+logfire.configure(send_to_logfire='never')
+
+class ChatMessage(TypedDict):
+    """Format of messages sent to the browser/API."""
+
+    role: Literal['user', 'model']
+    timestamp: str
+    content: str
 
 
-async def prompt_ai(messages):
-    async with AsyncClient() as client:
-        reddit_client_id = os.getenv('REDDIT_CLIENT_ID', None)
-        reddit_client_secret = os.getenv('REDDIT_CLIENT_SECRET', None)
+def display_message_part(part):
+    """
+    Display a single part of a message in the Streamlit UI.
+    Customize how you display system prompts, user prompts,
+    tool calls, tool returns, etc.
+    """
+    # system-prompt
+    if part.part_kind == 'system-prompt':
+        with st.chat_message("system"):
+            st.markdown(f"**System**: {part.content}")
+    # user-prompt
+    elif part.part_kind == 'user-prompt':
+        with st.chat_message("user"):
+            st.markdown(part.content)
+    # text
+    elif part.part_kind == 'text':
+        with st.chat_message("assistant"):
+            st.markdown(part.content) 
 
-        deps = Deps(client=client, reddit_client_id=reddit_client_id, reddit_client_secret=reddit_client_secret)
-
-        async with ai_agent.run_stream(
-            messages[-1].content, deps=deps, message_history=messages[:-1]
-        ) as result:
-            if "tool_usage" not in st.session_state:
-                st.session_state.tool_usage = []
-
-            # Stream the text response
-            async for message in result.stream_text(delta=True):
-                yield message
-            
-            await result.get_data()
-            
-            
-            # Process tool usage
-            tool_calls = []
-            for msg in result._all_messages:
-                if msg.role == 'model-structured-response' and hasattr(msg, 'calls'):
-                    for call in msg.calls:
-                        tool_info = {
-                            'id': call.tool_id,
-                            'tool': call.tool_name,
-                            'arguments': call.args.args_json,
-                            'response': None
-                        }
-                        tool_calls.append(tool_info)
-                elif msg.role == 'tool-return':
-                    for tool in tool_calls:
-                        if tool['id'] == msg.tool_id:
-                            tool['response'] = msg.content
-                            break
-            
-            if tool_calls:
-                st.session_state.tool_usage.append({
-                    'timestamp': str(result.timestamp()),
-                    'tool_calls': tool_calls
-                })
-                
-                yield "\n\n---\n**Tools Used in this Response:**\n"
-                for idx, tool in enumerate(tool_calls, 1):
-                    with st.expander(f"{idx}. {tool['tool']}", expanded=False):
-                        st.markdown("**Arguments:**")
-                        st.code(tool['arguments'], language='json')
+    # tool-return
+    elif part.part_kind == 'tool-return':
+        # st.write(part)
+        # st.write(type(part))
+        with st.expander(f"{part.tool_name}", expanded=False):
+                        # st.markdown("**Arguments:**") ARGUMENTS ARE NOW IN TOOL CALL PART
+                        # st.code(part['arguments'], language='json')
                         st.markdown("**Tool Output:**")
-                        # st.markdown(
-                        #     f"""<div style="height: 200px; overflow-y: auto; border: 1px solid #ccc; padding: 10px;">
-                        #     <pre>{tool['response']}</pre>
-                        #     </div>""", 
-                        #     unsafe_allow_html=True
-                        # )
-                        with stylable_container(
-                            "codeblock",
-                            """
-                            code {
-                                white-space: pre-wrap !important;
-                            }
-                            """,
-                        ):
-                            st.code(tool['response'], language='json')
+                        # st.code(part.content, language='json')
+                        st.markdown(
+                            f"""<div style="height: 200px; overflow-y: auto; border: 1px solid #ccc; padding: 10px;">
+                            <pre>{part.content}</pre>
+                            </div>""", 
+                            unsafe_allow_html=True
+                        )     
+        
+
+async def run_agent_with_streaming(user_input: str):
+    """
+    Run the agent with streaming text for the user_input prompt,
+    while maintaining the entire conversation in `st.session_state.messages`.
+    """
+    reddit_client_id = os.getenv('REDDIT_CLIENT_ID', None)
+    reddit_client_secret = os.getenv('REDDIT_CLIENT_SECRET', None)
+
+    deps = Deps(
+        client = httpx.AsyncClient(), 
+        reddit_client_id=reddit_client_id, 
+        reddit_client_secret=reddit_client_secret)
+
+    # Run the agent in a stream
+    try:
+        async with ai_agent.run_stream(
+            user_input,
+            deps=deps,
+            message_history= st.session_state.messages[:-1],  # pass entire conversation so far
+        ) as result:
+            # We'll gather partial text to show incrementally
+            partial_text = ""
+            message_placeholder = st.empty()
+
+            # Render partial text as it arrives
+            async for chunk in result.stream_text(delta=True):
+                partial_text += chunk
+                message_placeholder.markdown(partial_text)
+
+            # Now that the stream is finished, we have a final result.
+            # Add new messages from this run, excluding user-prompt messages
+            filtered_messages = [msg for msg in result.new_messages() 
+                            if not (hasattr(msg, 'parts') and 
+                                    any(part.part_kind == 'user-prompt' for part in msg.parts))]
+            st.session_state.messages.extend(filtered_messages)
+
+            # Add the final response to the messages
+            st.session_state.messages.append(
+                ModelResponse(parts=[TextPart(content=partial_text)])
+            )
+
+            st.write(st.session_state.messages)
+    finally:
+        await deps.client.aclose()
+
 
 async def main():
-    st.title("AI Chatbot with agents")
+    st.title("GitHub Repository Analyzer")
+    st.write("Ask questions about any GitHub repository!")
 
-    # Initialize chat history
+
+    # Initialize chat history in session state if not present
     if "messages" not in st.session_state:
-        st.session_state.messages = []    
+        st.session_state.messages = []
 
-    # Display tool usage history in sidebar
-    if "tool_usage" in st.session_state and st.session_state.tool_usage:
-        st.sidebar.header("Tool Usage History")
-        for idx, usage in enumerate(st.session_state.tool_usage):
-            with st.sidebar.expander(f"Interaction {idx + 1}"):
-                st.json(usage)
+    # Display all messages from the conversation so far
+    # Each message is either a ModelRequest or ModelResponse.
+    # We iterate over their parts to decide how to display them.
+    for msg in st.session_state.messages:
+        if isinstance(msg, ModelRequest) or isinstance(msg, ModelResponse):
+            for part in msg.parts:
+                display_message_part(part)
 
-    # Display chat messages from history on app rerun
-    for message in st.session_state.messages:
-        role = message.role
-        if role in ["user", "model-text-response"]:
-            with st.chat_message("human" if role == "user" else "ai"):
-                st.markdown(message.content)
+    # Chat input for the user
+    user_input = st.chat_input("What would you like to know about this repository?")
 
-    # React to user input
-    if prompt := st.chat_input("What would you like to find today?"):
-        # Display user message in chat message container
-        st.chat_message("user").markdown(prompt)
-        # Add user message to chat history
-        st.session_state.messages.append(UserPrompt(content=prompt))
+    if user_input:     
 
-        # Display assistant response in chat message container
-        response_content = ""
+        # We append a new request to the conversation explicitly
+        st.session_state.messages.append(
+            ModelRequest(parts=[UserPromptPart(content=user_input)])
+        )
+        
+        # Display user prompt in the UI
+        with st.chat_message("user"):
+            st.markdown(user_input)
+
+        # Display the assistant's partial response while streaming
         with st.chat_message("assistant"):
-            message_placeholder = st.empty()  # Placeholder for updating the message
-            # Run the async generator to fetch responses
-            async for chunk in prompt_ai(st.session_state.messages):
-                response_content += chunk
-                # Update the placeholder with the current response content
-                message_placeholder.markdown(response_content)
-      
-        st.session_state.messages.append(ModelTextResponse(content=response_content))
+            # Actually run the agent now, streaming the text
+            await run_agent_with_streaming(user_input)
+
 
 if __name__ == "__main__":
     asyncio.run(main())

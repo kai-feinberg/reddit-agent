@@ -6,23 +6,27 @@ import os
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict
+import httpx
 
 import logfire
 from devtools import debug
-from httpx import AsyncClient
 from dotenv import load_dotenv
 
 from openai import AsyncOpenAI
 from pydantic_ai.models.openai import OpenAIModel
 from pydantic_ai import Agent, ModelRetry, RunContext
-from youtube_transcript_api import YouTubeTranscriptApi
-from youtube_transcript_api.formatters import TextFormatter
 
 load_dotenv()
-llm = os.getenv('LLM_MODEL', 'gpt-4o')
+# llm = os.getenv('LLM_MODEL', 'google/gemini-2.0-flash-exp:free')
+llm = os.getenv('LLM_MODEL', 'gpt-4o-mini')
 
 
-model = OpenAIModel(llm) 
+model = OpenAIModel(
+    llm,
+    # base_url= 'https://openrouter.ai/api/v1',
+    # api_key= os.getenv('OPEN_ROUTER_API_KEY')
+    api_key= os.getenv('OPENAI_API_KEY')
+) 
 
 # 'if-token-present' means nothing will be sent (and the example will work) if you don't have logfire configured
 # logfire.configure(send_to_logfire='if-token-present')
@@ -40,7 +44,7 @@ logfire.configure(
 # Class for dependencies for agent (will be injected from ui)
 @dataclass
 class Deps:
-    client: AsyncClient
+    client: httpx.AsyncClient
     reddit_client_id: str | None
     reddit_client_secret: str | None
 
@@ -55,14 +59,38 @@ ai_agent = Agent(
     retries=2
 )
 
+
 @ai_agent.tool
-async def search_reddit(ctx: RunContext[Deps], query: str) -> Dict[str, Any]:
+async def find_subreddits(ctx: RunContext[Deps], query: str) -> Dict[str, Any]:
+    """
+    Search Reddit with a given query and return results as a dictionary.
+
+    Args:
+        ctx: The context containing dependencies such as Reddit credentials.
+        query: The subreddit to search for.
+
+    Returns:
+        A dictionary containing subreddits that match the query.
+    """
+    reddit = praw.Reddit(
+        client_id=ctx.deps.reddit_client_id,
+        client_secret=ctx.deps.reddit_client_secret,
+        user_agent='A search method for Reddit to surface the most relevant posts'
+    )
+
+    # Fetch search results
+    for subreddit in reddit.subreddits.search(query, limit=5):
+        return {"subreddit": subreddit.display_name}
+
+@ai_agent.tool
+async def search_reddit(ctx: RunContext[Deps], query: str, subreddit: str = "all") -> Dict[str, Any]:
     """
     Search Reddit with a given query and return results as a dictionary.
 
     Args:
         ctx: The context containing dependencies such as Reddit credentials.
         query: The search query.
+        subreddit: The subreddit to search in (default is "all").
 
     Returns:
         A dictionary containing the search results with relevant posts and their comments.
@@ -74,7 +102,7 @@ async def search_reddit(ctx: RunContext[Deps], query: str) -> Dict[str, Any]:
     )
 
     # Fetch search results
-    search_results = reddit.subreddit("all").search(query, limit=5)
+    search_results = reddit.subreddit(subreddit).search(query, limit=5)
 
     # Process results into a JSON-like structure
     result_list = []
@@ -112,7 +140,6 @@ async def search_reddit(ctx: RunContext[Deps], query: str) -> Dict[str, Any]:
 
     # Return as a dictionary
     return {"results": result_list}
-
 
 async def main():
     # async with AsyncClient() as client:
