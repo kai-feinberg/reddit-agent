@@ -57,22 +57,27 @@ def display_message_part(part):
         with st.chat_message("assistant"):
             st.markdown(part.content) 
 
+    elif part.part_kind == 'tool-call':
+        args = json.loads(part.args.args_json)
+        st.session_state.tool_calls[part.tool_call_id] = args
+
     # tool-return
     elif part.part_kind == 'tool-return':
-        # st.write(part)
-        # st.write(type(part))
+        tool_args = st.session_state.tool_calls.get(part.tool_call_id, {})
+
         with st.expander(f"{part.tool_name}", expanded=False):
-                        # st.markdown("**Arguments:**") ARGUMENTS ARE NOW IN TOOL CALL PART
-                        # st.code(part['arguments'], language='json')
-                        st.markdown("**Tool Output:**")
-                        # st.code(part.content, language='json')
-                        st.markdown(
-                            f"""<div style="height: 200px; overflow-y: auto; border: 1px solid #ccc; padding: 10px;">
-                            <pre>{part.content}</pre>
-                            </div>""", 
-                            unsafe_allow_html=True
-                        )     
-        
+            st.markdown("**Tool Call Arguments:**")
+            st.code(json.dumps(tool_args, indent=2), language="json")
+
+            st.markdown("**Tool Output:**")
+            # st.markdown(
+            #     f"""<div style="height: 200px; overflow-y: auto; border: 1px solid #ccc; padding: 10px;">
+            #     <pre>{part.content}</pre>
+            #     </div>""", 
+            #     unsafe_allow_html=True
+            # )     
+            st.code(json.dumps(part.content, indent=2), language="json")
+
 
 async def run_agent_with_streaming(user_input: str):
     """
@@ -115,7 +120,7 @@ async def run_agent_with_streaming(user_input: str):
                 ModelResponse(parts=[TextPart(content=partial_text)])
             )
 
-            st.write(st.session_state.messages)
+            # st.write(st.session_state.messages)
     finally:
         await deps.client.aclose()
 
@@ -128,6 +133,9 @@ async def main():
     # Initialize chat history in session state if not present
     if "messages" not in st.session_state:
         st.session_state.messages = []
+
+    if "tool_calls" not in st.session_state:
+        st.session_state.tool_calls = {}
 
     # Display all messages from the conversation so far
     # Each message is either a ModelRequest or ModelResponse.
