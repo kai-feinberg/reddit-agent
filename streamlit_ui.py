@@ -64,18 +64,11 @@ def display_message_part(part):
     # tool-return
     elif part.part_kind == 'tool-return':
         tool_args = st.session_state.tool_calls.get(part.tool_call_id, {})
-
-        with st.expander(f"{part.tool_name}", expanded=False):
+        with st.expander(f"Used tool: {part.tool_name}", expanded=False):
             st.markdown("**Tool Call Arguments:**")
             st.code(json.dumps(tool_args, indent=2), language="json")
 
-            st.markdown("**Tool Output:**")
-            # st.markdown(
-            #     f"""<div style="height: 200px; overflow-y: auto; border: 1px solid #ccc; padding: 10px;">
-            #     <pre>{part.content}</pre>
-            #     </div>""", 
-            #     unsafe_allow_html=True
-            # )     
+            st.markdown("**Tool Output:**")                 
             st.code(json.dumps(part.content, indent=2), language="json")
 
 
@@ -108,18 +101,30 @@ async def run_agent_with_streaming(user_input: str):
                 partial_text += chunk
                 message_placeholder.markdown(partial_text)
 
-            # Now that the stream is finished, we have a final result.
-            # Add new messages from this run, excluding user-prompt messages
-            filtered_messages = [msg for msg in result.new_messages() 
-                            if not (hasattr(msg, 'parts') and 
-                                    any(part.part_kind == 'user-prompt' for part in msg.parts))]
-            st.session_state.messages.extend(filtered_messages)
 
             # Add the final response to the messages
             st.session_state.messages.append(
                 ModelResponse(parts=[TextPart(content=partial_text)])
             )
 
+            # Now that the stream is finished, we have a final result.
+            # Add new messages from this run, excluding user-prompt messages
+            # THIS ADDS THE TOOL PARTS AFTER THE RESPONSE SO WE CAN DISPLAY THEM AT THE END OF THE RESPONSE
+            filtered_messages = [msg for msg in result.new_messages() 
+                            if not (hasattr(msg, 'parts') and 
+                                    any(part.part_kind == 'user-prompt' for part in msg.parts))]
+            st.session_state.messages.extend(filtered_messages)
+
+            ## now we display tools and tool usage from this response ...
+            new_messages = result.new_messages()
+            for msg in new_messages:
+                if isinstance(msg, ModelRequest) or isinstance(msg, ModelResponse):
+                    for part in msg.parts:
+                        if part.part_kind == 'tool-call' or part.part_kind == 'tool-return':
+                            display_message_part(part)
+
+            
+            #display all messages for debugging
             # st.write(st.session_state.messages)
     finally:
         await deps.client.aclose()
