@@ -151,7 +151,7 @@ async def main():
                 display_message_part(part)
 
     # Chat input for the user
-    user_input = st.chat_input("What would you like to know about this repository?")
+    user_input = st.chat_input("What would you like to know about today?")
 
     if user_input:     
 

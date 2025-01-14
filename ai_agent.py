@@ -70,10 +70,11 @@ ai_agent = Agent(
     </role>
 
     <mandatoryResponseStructure>
-        EVERY response MUST contain these exact sections in this order:
-        1. "SEARCH CONDUCTED:" (List specific subreddits and search terms used)
-        2. "FINDINGS:" (Bulleted insights, each with link and upvote count)
-        3. "VERIFICATION:" (How you validated the information)
+        EVERY response MUST contain these exact sections in this order in markdown format:
+        1. Bulleted insight
+        2. User name of comment author in [brackets] (that links to the post)
+        3. Upvote count in { brackets }
+
     </mandatoryResponseStructure>
 
     <searchProtocol>

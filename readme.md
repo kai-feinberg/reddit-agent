@@ -1,5 +1,8 @@
 # Pydantic AI agents with Streamlit UI:
 
+![Demo Video](demo.mp4)
+
+
 ## Description
 This is a template repository for creating basic chat applications with pydantic ai agents. This is a great frontend and starting point that allows you to focus on building useful agents rather than detailed frontends.
 
