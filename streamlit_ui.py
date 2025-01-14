@@ -131,8 +131,8 @@ async def run_agent_with_streaming(user_input: str):
 
 
 async def main():
-    st.title("GitHub Repository Analyzer")
-    st.write("Ask questions about any GitHub repository!")
+    st.title("Reddit Search Analyzer")
+    st.write("Ask me anything that I can search on Reddit!")
 
 
     # Initialize chat history in session state if not present
