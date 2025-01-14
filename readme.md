@@ -1,6 +1,6 @@
 # Pydantic AI agents with Streamlit UI:
 
-![Demo Video](demo.gif)
+![Demo Video](./demo.gif)
 
 
 ## Description
