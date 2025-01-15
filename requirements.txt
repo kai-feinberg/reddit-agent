@@ -79,6 +79,7 @@ urllib3==2.2.3
 watchdog==6.0.0
 wrapt==1.17.0
 zipp==3.21.0
-youtube-transcript-api==0.6.3
-praw==7.8.1
-prawcore==2.4.0
+# praw==7.8.1
+# prawcore==2.4.0
+asyncpraw==7.8.1 
+asyncprawcore==2.4.0 

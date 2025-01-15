@@ -1,6 +1,6 @@
 from __future__ import annotations as _annotations
 
-import praw
+import asyncpraw
 import asyncio
 import os
 from dataclasses import dataclass
@@ -170,16 +170,19 @@ async def find_subreddits(ctx: RunContext[Deps], query: str) -> Dict[str, Any]:
     Returns:
         A dictionary containing subreddits that match the query.
     """
-    reddit = praw.Reddit(
+    reddit = asyncpraw.Reddit(
         client_id=ctx.deps.reddit_client_id,
         client_secret=ctx.deps.reddit_client_secret,
         user_agent='A search method for Reddit to surface the most relevant posts'
     )
-
     # Fetch search results
-    for subreddit in reddit.subreddits.search(query, limit=5):
-        return {"subreddit": subreddit.display_name}
-
+    subreddits = []
+    async for subreddit in reddit.subreddits.search(query, limit=5):
+        subreddits.append(subreddit.display_name)
+    
+    await reddit.close()
+    return {"subreddits": subreddits}
+    
 @ai_agent.tool
 async def search_reddit(ctx: RunContext[Deps], query: str, subreddit: str = "all") -> Dict[str, Any]:
     """
@@ -193,36 +196,39 @@ async def search_reddit(ctx: RunContext[Deps], query: str, subreddit: str = "all
     Returns:
         A dictionary containing the search results with relevant posts and their comments.
     """
-    reddit = praw.Reddit(
+    reddit = asyncpraw.Reddit(
         client_id=ctx.deps.reddit_client_id,
         client_secret=ctx.deps.reddit_client_secret,
         user_agent='A search method for Reddit to surface the most relevant posts'
     )
 
     # Fetch search results
-    search_results = reddit.subreddit(subreddit).search(query, limit=5)
+    subreddit_instance = await reddit.subreddit(subreddit)
 
     # Process results into a JSON-like structure
     result_list = []
-    for post in search_results:
+    async for post in subreddit_instance.search(query, limit=5):
         if not post.selftext:  # Skip posts without text
             continue
+
+        # Ensure comments are loaded before accessing them
+        await post.load()  # Load the submission to access comments
 
         # Fetch and sort comments by score
         comments = sorted(
             post.comments.list(),  # Flatten the comment tree
-            key=lambda comment: comment.score if isinstance(comment, praw.models.Comment) else 0,
+            key=lambda comment: comment.score if isinstance(comment, asyncpraw.models.Comment) else 0,
             reverse=True
         )
 
-        # Extract relevant fields for comments, limiting to the first 15 processed comments
+        # Extract relevant fields for comments, limiting to the first 8 processed comments
         processed_comments = [
             {
                 "author": comment.author.name if comment.author else None,
                 "score": comment.score,
                 "body": comment.body[:1800]  # Limit the comment body length
             }
-            for comment in comments if isinstance(comment, praw.models.Comment) and comment.body != "[removed]"
+            for comment in comments if isinstance(comment, asyncpraw.models.Comment) and comment.body != "[removed]"
         ][:8]  # Take only the first 8 comments
 
         # Append post details to the results list
@@ -236,21 +242,6 @@ async def search_reddit(ctx: RunContext[Deps], query: str, subreddit: str = "all
             "comments": processed_comments
         })
 
+    await reddit.close()
     # Return as a dictionary
     return {"results": result_list}
-
-async def main():
-    # async with AsyncClient() as client:
-    #     brave_api_key = os.getenv('BRAVE_API_KEY', None)
-    #     deps = Deps(client=client, brave_api_key=brave_api_key)
-
-    #     result = await web_search_agent.run(
-    #         'Give me some articles talking about the new release of React 19.', deps=deps
-    #     )
-        
-    #     debug(result)
-    #     print('Response:', result.data)
-    print("this doesn't matter")
-
-if __name__ == '__main__':
-    asyncio.run(main())
