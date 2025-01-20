@@ -79,12 +79,16 @@ async def run_agent_with_streaming(user_input: str):
     """
     reddit_client_id = os.getenv('REDDIT_CLIENT_ID', None)
     reddit_client_secret = os.getenv('REDDIT_CLIENT_SECRET', None)
+    brave_api_key = os.getenv('BRAVE_API_KEY', None)
 
     deps = Deps(
         client = httpx.AsyncClient(), 
         reddit_client_id=reddit_client_id, 
-        reddit_client_secret=reddit_client_secret)
+        reddit_client_secret=reddit_client_secret,
+        brave_api_key=brave_api_key
+        )
 
+    user_input = "use reddit to answer this question: " + user_input
     # Run the agent in a stream
     try:
         async with ai_agent.run_stream(
